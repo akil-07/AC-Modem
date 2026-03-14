@@ -1,11 +1,15 @@
 #include <ESP8266WiFi.h>
 #include <ESP8266WebServer.h>
+#include <time.h>
 
 // Replace with your Network Credentials
 const char* ssid = "YOUR_WIFI_SSID";
 const char* password = "YOUR_WIFI_PASSWORD";
 
 ESP8266WebServer server(80);
+
+String scheduledTime = "";
+bool scheduleTriggered = false;
 
 // Pin Definitions for BC547 Transistor Base connections (via 1k resistor)
 const int PIN_POWER = D1;      // Power Button
@@ -64,13 +68,15 @@ const char html_page[] PROGMEM = R"rawliteral(<!DOCTYPE html>
     .title-row { display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px; }
     h1 { font-size: 26px; font-weight: 800; }
 
-    /* Switch */
-    .switch { position: relative; display: inline-block; width: 56px; height: 32px; }
-    .switch input { opacity: 0; width: 0; height: 0; }
-    .slider { position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0; background-color: #e5e7eb; transition: .4s; border-radius: 34px; }
-    .slider:before { position: absolute; content: ""; height: 26px; width: 26px; left: 3px; bottom: 3px; background-color: white; transition: .4s; border-radius: 50%; box-shadow: 0 2px 5px rgba(0,0,0,0.2); }
-    input:checked + .slider { background-color: #3b82f6; }
-    input:checked + .slider:before { transform: translateX(24px); }
+    /* Power Button */
+    .power-btn {
+      width: 48px; height: 48px; border-radius: 50%; border: none;
+      background: #ef4444; color: white; display: flex; justify-content: center; align-items: center;
+      cursor: pointer; box-shadow: 0 4px 15px rgba(239, 68, 68, 0.4); transition: all 0.2s;
+    }
+    .power-btn.on { background: #10b981; box-shadow: 0 4px 15px rgba(16, 185, 129, 0.4); }
+    .power-btn:active { transform: scale(0.92); }
+    .power-btn svg { width: 22px; height: 22px; }
 
     /* Modes */
     .modes { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-bottom: 40px; }
@@ -117,6 +123,23 @@ const char html_page[] PROGMEM = R"rawliteral(<!DOCTYPE html>
     .ctrl-btn:hover { background-color: #f9fafb; border-color: #d1d5db; box-shadow: 0 6px 15px rgba(0,0,0,0.05); }
     .ctrl-btn:active { transform: scale(0.96); }
 
+    /* Schedule */
+    .schedule-card {
+      background: #f9fafb; border: 1px solid #e5e7eb; border-radius: 20px; padding: 16px; margin-bottom: 30px;
+      display: flex; justify-content: space-between; align-items: center; box-shadow: 0 4px 10px rgba(0,0,0,0.02);
+    }
+    .schedule-info { display: flex; flex-direction: column; }
+    .schedule-info label { font-size: 14px; font-weight: 700; color: #374151; margin-bottom: 4px; }
+    .schedule-info input[type="time"] { 
+      font-family: 'Inter', sans-serif; font-size: 18px; font-weight: 700; color: #3b82f6; 
+      border: none; background: transparent; outline: none; cursor: pointer;
+    }
+    .schedule-btn {
+      background: #3b82f6; color: white; border: none; padding: 12px 20px; border-radius: 14px;
+      font-size: 13px; font-weight: 600; cursor: pointer; box-shadow: 0 4px 15px rgba(59, 130, 246, 0.3); transition: all 0.2s;
+    }
+    .schedule-btn:active { transform: scale(0.95); }
+
     /* Toast Notification */
     #toast {
       visibility: hidden; min-width: 200px; background-color: #111827; color: #fff; text-align: center; border-radius: 50px; padding: 12px 24px; position: fixed; z-index: 100; left: 50%; transform: translateX(-50%); bottom: 40px; font-size: 14px; font-weight: 500; opacity: 0; transition: opacity 0.3s, bottom 0.3s; box-shadow: 0 10px 25px rgba(0,0,0,0.2);
@@ -140,10 +163,12 @@ const char html_page[] PROGMEM = R"rawliteral(<!DOCTYPE html>
 
   <div class="title-row">
     <h1>Air Condition</h1>
-    <label class="switch">
-      <input type="checkbox" id="power-toggle" checked>
-      <span class="slider"></span>
-    </label>
+    <button id="power-btn" class="power-btn on" onclick="togglePower()">
+      <svg fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M18.36 6.64a9 9 0 1 1-12.73 0"></path>
+        <line x1="12" y1="2" x2="12" y2="12"></line>
+      </svg>
+    </button>
   </div>
 
   <div class="modes">
@@ -192,6 +217,18 @@ const char html_page[] PROGMEM = R"rawliteral(<!DOCTYPE html>
       <button class="temp-btn" onclick="changeTemp(-1)">-</button>
       <button class="temp-btn" onclick="changeTemp(1)">+</button>
     </div>
+  </div>
+
+  <div class="controls-header">
+    <h2>Smart Schedule</h2>
+  </div>
+  
+  <div class="schedule-card">
+    <div class="schedule-info">
+      <label>Auto Turn-ON Time</label>
+      <input type="time" id="auto-on-time" value="08:00">
+    </div>
+    <button class="schedule-btn" onclick="setSchedule()">Set Timer</button>
   </div>
 
   <div class="controls-header">
@@ -262,14 +299,35 @@ const char html_page[] PROGMEM = R"rawliteral(<!DOCTYPE html>
     }
   }
 
-  document.getElementById('power-toggle').addEventListener('change', function() {
+  let powerState = true;
+  function togglePower() {
+    powerState = !powerState;
+    const btn = document.getElementById('power-btn');
+    if(powerState) {
+      btn.classList.add('on');
+    } else {
+      btn.classList.remove('on');
+    }
     simulateCommand('/power');
-  });
+  }
 
   function setMode(mode) {
     document.querySelectorAll('.mode-btn').forEach(btn => btn.classList.remove('active'));
     event.currentTarget.classList.add('active');
     showToast(`Mode: ${mode.toUpperCase()}`);
+  }
+
+  function setSchedule() {
+    const timeVal = document.getElementById('auto-on-time').value;
+    if(!timeVal) return;
+    
+    showToast(`AC Scheduled for ${timeVal}`);
+    
+    // Convert time to a format the ESP8266 can parse easily (like HH:MM)
+    fetch(`/schedule?time=${timeVal}`).catch(err => {
+      // Fallback for UI testing
+      !window.location.protocol.includes('http') && console.log(`Triggered: /schedule?time=${timeVal}`);
+    });
   }
 
   function showToast(msg) {
@@ -396,6 +454,16 @@ const char icon_svg[] PROGMEM = R"rawliteral(<svg xmlns="http://www.w3.org/2000/
 void handlePower() { pressButton(PIN_POWER); server.send(200, "text/plain", "Power Button Pressed"); }
 void handleTempUp() { pressButton(PIN_TEMP_UP); server.send(200, "text/plain", "Temp Up Pressed"); }
 void handleTempDown() { pressButton(PIN_TEMP_DOWN); server.send(200, "text/plain", "Temp Down Pressed"); }
+void handleSchedule() {
+  if (server.hasArg("time")) {
+    scheduledTime = server.arg("time");
+    scheduleTriggered = false;
+    server.send(200, "text/plain", "Scheduled for " + scheduledTime);
+    Serial.println("Scheduled for " + scheduledTime);
+  } else {
+    server.send(400, "text/plain", "Bad Request");
+  }
+}
 void handleNotFound() { server.send(404, "text/plain", "Not Found"); }
 
 void setup() {
@@ -410,6 +478,8 @@ void setup() {
   Serial.println(""); Serial.print("Connected to "); Serial.println(ssid);
   Serial.print("IP address: "); Serial.println(WiFi.localIP());
 
+  configTime(19800, 0, "pool.ntp.org", "time.nist.gov"); // IST Timezone offset: 5.5 * 3600 = 19800
+
   // Serve static UI assets from PROGMEM
   server.on("/", []() { server.send_P(200, "text/html", html_page); });
   server.on("/UI_Preview.html", []() { server.send_P(200, "text/html", html_page); });
@@ -422,6 +492,7 @@ void setup() {
   server.on("/power", handlePower);
   server.on("/temp_up", handleTempUp);
   server.on("/temp_down", handleTempDown);
+  server.on("/schedule", handleSchedule);
   
   // Dummy handlers for other un-implemented endpoints to avoid 404s in console
   server.on("/timer_on", [](){ server.send(200, "text/plain", "OK"); });
@@ -439,4 +510,23 @@ void setup() {
   server.begin(); Serial.println("HTTP server started");
 }
 
-void loop() { server.handleClient(); }
+void loop() { 
+  server.handleClient(); 
+  
+  if (scheduledTime != "" && !scheduleTriggered) {
+    time_t now = time(nullptr);
+    struct tm* timeinfo = localtime(&now);
+    
+    // Check if time is properly synced (year > 1970)
+    if (timeinfo->tm_year > 70) {
+      char timeStr[6];
+      sprintf(timeStr, "%02d:%02d", timeinfo->tm_hour, timeinfo->tm_min);
+      
+      if (String(timeStr) == scheduledTime) {
+        Serial.println("Schedule Triggered! Turning ON AC.");
+        pressButton(PIN_POWER);
+        scheduleTriggered = true; // Prevent running multiple times in same minute
+      }
+    }
+  }
+}

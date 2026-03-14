@@ -15,12 +15,16 @@ def build_ino():
 
     ino_content = f"""#include <ESP8266WiFi.h>
 #include <ESP8266WebServer.h>
+#include <time.h>
 
 // Replace with your Network Credentials
 const char* ssid = "YOUR_WIFI_SSID";
 const char* password = "YOUR_WIFI_PASSWORD";
 
 ESP8266WebServer server(80);
+
+String scheduledTime = "";
+bool scheduleTriggered = false;
 
 // Pin Definitions for BC547 Transistor Base connections (via 1k resistor)
 const int PIN_POWER = D1;      // Power Button
@@ -46,6 +50,16 @@ const char icon_svg[] PROGMEM = R"rawliteral({icon})rawliteral";
 void handlePower() {{ pressButton(PIN_POWER); server.send(200, "text/plain", "Power Button Pressed"); }}
 void handleTempUp() {{ pressButton(PIN_TEMP_UP); server.send(200, "text/plain", "Temp Up Pressed"); }}
 void handleTempDown() {{ pressButton(PIN_TEMP_DOWN); server.send(200, "text/plain", "Temp Down Pressed"); }}
+void handleSchedule() {{
+  if (server.hasArg("time")) {{
+    scheduledTime = server.arg("time");
+    scheduleTriggered = false;
+    server.send(200, "text/plain", "Scheduled for " + scheduledTime);
+    Serial.println("Scheduled for " + scheduledTime);
+  }} else {{
+    server.send(400, "text/plain", "Bad Request");
+  }}
+}}
 void handleNotFound() {{ server.send(404, "text/plain", "Not Found"); }}
 
 void setup() {{
@@ -60,6 +74,8 @@ void setup() {{
   Serial.println(""); Serial.print("Connected to "); Serial.println(ssid);
   Serial.print("IP address: "); Serial.println(WiFi.localIP());
 
+  configTime(19800, 0, "pool.ntp.org", "time.nist.gov"); // IST Timezone offset: 5.5 * 3600 = 19800
+
   // Serve static UI assets from PROGMEM
   server.on("/", []() {{ server.send_P(200, "text/html", html_page); }});
   server.on("/UI_Preview.html", []() {{ server.send_P(200, "text/html", html_page); }});
@@ -72,6 +88,7 @@ void setup() {{
   server.on("/power", handlePower);
   server.on("/temp_up", handleTempUp);
   server.on("/temp_down", handleTempDown);
+  server.on("/schedule", handleSchedule);
   
   // Dummy handlers for other un-implemented endpoints to avoid 404s in console
   server.on("/timer_on", [](){{ server.send(200, "text/plain", "OK"); }});
@@ -89,7 +106,26 @@ void setup() {{
   server.begin(); Serial.println("HTTP server started");
 }}
 
-void loop() {{ server.handleClient(); }}
+void loop() {{ 
+  server.handleClient(); 
+  
+  if (scheduledTime != "" && !scheduleTriggered) {{
+    time_t now = time(nullptr);
+    struct tm* timeinfo = localtime(&now);
+    
+    // Check if time is properly synced (year > 1970)
+    if (timeinfo->tm_year > 70) {{
+      char timeStr[6];
+      sprintf(timeStr, "%02d:%02d", timeinfo->tm_hour, timeinfo->tm_min);
+      
+      if (String(timeStr) == scheduledTime) {{
+        Serial.println("Schedule Triggered! Turning ON AC.");
+        pressButton(PIN_POWER);
+        scheduleTriggered = true; // Prevent running multiple times in same minute
+      }}
+    }}
+  }}
+}}
 """
 
     with open('AC_Controller/AC_Controller.ino', 'w', encoding='utf-8') as f:
