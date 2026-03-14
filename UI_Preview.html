@@ -95,6 +95,23 @@
     .ctrl-btn:hover { background-color: #f9fafb; border-color: #d1d5db; box-shadow: 0 6px 15px rgba(0,0,0,0.05); }
     .ctrl-btn:active { transform: scale(0.96); }
 
+    /* Schedule */
+    .schedule-card {
+      background: #f9fafb; border: 1px solid #e5e7eb; border-radius: 20px; padding: 16px; margin-bottom: 30px;
+      display: flex; justify-content: space-between; align-items: center; box-shadow: 0 4px 10px rgba(0,0,0,0.02);
+    }
+    .schedule-info { display: flex; flex-direction: column; }
+    .schedule-info label { font-size: 14px; font-weight: 700; color: #374151; margin-bottom: 4px; }
+    .schedule-info input[type="time"] { 
+      font-family: 'Inter', sans-serif; font-size: 18px; font-weight: 700; color: #3b82f6; 
+      border: none; background: transparent; outline: none; cursor: pointer;
+    }
+    .schedule-btn {
+      background: #3b82f6; color: white; border: none; padding: 12px 20px; border-radius: 14px;
+      font-size: 13px; font-weight: 600; cursor: pointer; box-shadow: 0 4px 15px rgba(59, 130, 246, 0.3); transition: all 0.2s;
+    }
+    .schedule-btn:active { transform: scale(0.95); }
+
     /* Toast Notification */
     #toast {
       visibility: hidden; min-width: 200px; background-color: #111827; color: #fff; text-align: center; border-radius: 50px; padding: 12px 24px; position: fixed; z-index: 100; left: 50%; transform: translateX(-50%); bottom: 40px; font-size: 14px; font-weight: 500; opacity: 0; transition: opacity 0.3s, bottom 0.3s; box-shadow: 0 10px 25px rgba(0,0,0,0.2);
@@ -172,6 +189,18 @@
       <button class="temp-btn" onclick="changeTemp(-1)">-</button>
       <button class="temp-btn" onclick="changeTemp(1)">+</button>
     </div>
+  </div>
+
+  <div class="controls-header">
+    <h2>Smart Schedule</h2>
+  </div>
+  
+  <div class="schedule-card">
+    <div class="schedule-info">
+      <label>Auto Turn-ON Time</label>
+      <input type="time" id="auto-on-time" value="08:00">
+    </div>
+    <button class="schedule-btn" onclick="setSchedule()">Set Timer</button>
   </div>
 
   <div class="controls-header">
@@ -258,6 +287,19 @@
     document.querySelectorAll('.mode-btn').forEach(btn => btn.classList.remove('active'));
     event.currentTarget.classList.add('active');
     showToast(`Mode: ${mode.toUpperCase()}`);
+  }
+
+  function setSchedule() {
+    const timeVal = document.getElementById('auto-on-time').value;
+    if(!timeVal) return;
+    
+    showToast(`AC Scheduled for ${timeVal}`);
+    
+    // Convert time to a format the ESP8266 can parse easily (like HH:MM)
+    fetch(`/schedule?time=${timeVal}`).catch(err => {
+      // Fallback for UI testing
+      !window.location.protocol.includes('http') && console.log(`Triggered: /schedule?time=${timeVal}`);
+    });
   }
 
   function showToast(msg) {
