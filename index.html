@@ -63,8 +63,9 @@
 
     /* Dial */
     .dial-container { position: relative; width: 260px; height: 260px; margin: 0 auto 50px auto; display: flex; justify-content: center; align-items: center; }
-    .progress-ring { position: absolute; top: 0; left: 0; transform: rotate(-225deg); }
-    .progress-ring__circle { transition: stroke-dashoffset 0.3s ease-out; transform: rotate(-90deg); transform-origin: 50% 50%; }
+    .progress-ring { position: absolute; top: 0; left: 0; }
+    .progress-ring__circle { transition: stroke-dashoffset 0.3s ease-out; }
+    .progress-ring__circle-bg { transition: stroke-dashoffset 0.3s ease-out; }
     .dial-center {
       width: 170px; height: 170px; background: white; border-radius: 50%;
       display: flex; justify-content: center; align-items: center; box-shadow: 0 10px 40px rgba(0,0,0,0.08); z-index: 2;
@@ -165,19 +166,19 @@
   <div class="dial-container">
     <svg class="progress-ring" width="260" height="260">
       <!-- Markers -->
-      <g stroke="#9ca3af" stroke-width="1.5" stroke-linecap="round" opacity="0.6" transform="rotate(-45 130 130)">
-        <line x1="130" y1="10" x2="130" y2="20" transform="rotate(270 130 130)" />
-        <line x1="130" y1="10" x2="130" y2="20" transform="rotate(300 130 130)" />
-        <line x1="130" y1="10" x2="130" y2="20" transform="rotate(330 130 130)" />
+      <g stroke="#9ca3af" stroke-width="1.5" stroke-linecap="round" opacity="0.6">
+        <line x1="130" y1="10" x2="130" y2="20" transform="rotate(-135 130 130)" />
+        <line x1="130" y1="10" x2="130" y2="20" transform="rotate(-90 130 130)" />
+        <line x1="130" y1="10" x2="130" y2="20" transform="rotate(-45 130 130)" />
         <line x1="130" y1="10" x2="130" y2="20" transform="rotate(0 130 130)" />
-        <line x1="130" y1="10" x2="130" y2="20" transform="rotate(30 130 130)" />
-        <line x1="130" y1="10" x2="130" y2="20" transform="rotate(60 130 130)" />
+        <line x1="130" y1="10" x2="130" y2="20" transform="rotate(45 130 130)" />
         <line x1="130" y1="10" x2="130" y2="20" transform="rotate(90 130 130)" />
+        <line x1="130" y1="10" x2="130" y2="20" transform="rotate(135 130 130)" />
       </g>
       
       <!-- Arcs -->
-      <circle class="progress-ring__circle-bg" stroke="#e0f2fe" stroke-width="14" fill="transparent" r="95" cx="130" cy="130" stroke-dasharray="597" stroke-dashoffset="150" stroke-linecap="round"/>
-      <circle class="progress-ring__circle" stroke="#3b82f6" stroke-width="14" fill="transparent" r="95" cx="130" cy="130" stroke-dasharray="597" stroke-dashoffset="400" stroke-linecap="round"/>
+      <circle class="progress-ring__circle-bg" stroke="#e0f2fe" stroke-width="14" fill="transparent" r="95" cx="130" cy="130" stroke-linecap="round" transform="rotate(135 130 130)"/>
+      <circle class="progress-ring__circle" stroke="#3b82f6" stroke-width="14" fill="transparent" r="95" cx="130" cy="130" stroke-linecap="round" transform="rotate(135 130 130)"/>
       <circle id="dial-thumb" cx="130" cy="35" r="7" fill="#3b82f6" stroke="#fff" stroke-width="3" />
     </svg>
     
@@ -230,26 +231,28 @@
   const maxTemp = 30;
   
   const circle = document.querySelector('.progress-ring__circle');
+  const circleBg = document.querySelector('.progress-ring__circle-bg');
   const radius = circle.r.baseVal.value;
   const circumference = radius * 2 * Math.PI;
   const arcLength = circumference * 0.75; // 270 degrees
   
   circle.style.strokeDasharray = `${circumference} ${circumference}`;
+  circleBg.style.strokeDasharray = `${circumference} ${circumference}`;
+  circleBg.style.strokeDashoffset = circumference - arcLength;
   
   function updateDial() {
     const percent = (temp - minTemp) / (maxTemp - minTemp);
     
     // Calculate SVG stroke offset for the filled arc
     const offset = circumference - (percent * arcLength);
-    circle.style.strokeDashoffset = offset + (circumference * 0.25);
+    circle.style.strokeDashoffset = offset;
     
     // Position thumb on the arc
-    // Circle is rotated -90deg then its parent -225deg = -315deg
-    // The visual start of the arc is at -135deg on standard 0-360 plane.
-    // Let's do pure math for the thumb position relative to SVG center (130, 130)
-    const startAngle = 135; // degrees from top, clockwise
+    // Start angle in SVG standard rotation (0 is right, increasing clockwise)
+    // 135 degrees is 7:30 position
+    const startAngle = 135;
     const currentAngle = startAngle + (percent * 270);
-    const rad = (currentAngle - 90) * (Math.PI / 180);
+    const rad = currentAngle * (Math.PI / 180);
     
     const cx = 130 + radius * Math.cos(rad);
     const cy = 130 + radius * Math.sin(rad);
