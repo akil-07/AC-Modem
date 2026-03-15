@@ -84,6 +84,18 @@
     }
     .temp-btn:active { transform: scale(0.95); }
 
+    /* Connection Status */
+    .status-badge {
+      display: flex; align-items: center; gap: 6px;
+      font-size: 12px; font-weight: 600; color: #6b7280;
+    }
+    .status-dot {
+      width: 8px; height: 8px; border-radius: 50%; background: #d1d5db;
+      transition: background 0.4s;
+    }
+    .status-dot.connected { background: #10b981; box-shadow: 0 0 0 3px rgba(16,185,129,0.2); }
+    .status-dot.disconnected { background: #ef4444; box-shadow: 0 0 0 3px rgba(239,68,68,0.2); }
+
     /* Extra Controls */
     .controls-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; }
     .controls-header h2 { font-size: 20px; font-weight: 800; }
@@ -129,9 +141,10 @@
       <svg width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M15 19l-7-7 7-7"></path></svg>
     </button>
     <h2>Living Room</h2>
-    <button class="icon-btn">
-      <svg width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9"></path></svg>
-    </button>
+    <div class="status-badge">
+      <div id="status-dot" class="status-dot"></div>
+      <span id="status-text">--</span>
+    </div>
   </header>
 
   <div class="title-row">
@@ -226,112 +239,126 @@
 <div id="toast">Command Sent Successfully!</div>
 
 <script>
+  // ── ESP8266 Config ──────────────────────────────────────────
+  const ESP_IP = 'http://192.168.4.1';  // Default AP IP of ESP8266
+  // ────────────────────────────────────────────────────────────
+
   let temp = 24;
   const minTemp = 16;
   const maxTemp = 30;
-  
+
   const circle = document.querySelector('.progress-ring__circle');
   const circleBg = document.querySelector('.progress-ring__circle-bg');
   const radius = circle.r.baseVal.value;
   const circumference = radius * 2 * Math.PI;
-  const arcLength = circumference * 0.75; // 270 degrees
-  
+  const arcLength = circumference * 0.75;
+
   circle.style.strokeDasharray = `${circumference} ${circumference}`;
   circleBg.style.strokeDasharray = `${circumference} ${circumference}`;
   circleBg.style.strokeDashoffset = circumference - arcLength;
-  
+
   function updateDial() {
     const percent = (temp - minTemp) / (maxTemp - minTemp);
-    
-    // Calculate SVG stroke offset for the filled arc
     const offset = circumference - (percent * arcLength);
     circle.style.strokeDashoffset = offset;
-    
-    // Position thumb on the arc
-    // Start angle in SVG standard rotation (0 is right, increasing clockwise)
-    // 135 degrees is 7:30 position
+
     const startAngle = 135;
     const currentAngle = startAngle + (percent * 270);
     const rad = currentAngle * (Math.PI / 180);
-    
     const cx = 130 + radius * Math.cos(rad);
     const cy = 130 + radius * Math.sin(rad);
-    
-    const thumb = document.getElementById('dial-thumb');
-    thumb.setAttribute('cx', cx);
-    thumb.setAttribute('cy', cy);
+    document.getElementById('dial-thumb').setAttribute('cx', cx);
+    document.getElementById('dial-thumb').setAttribute('cy', cy);
   }
 
+  // ── Send command to ESP8266 ──────────────────────────────────
+  async function sendCommand(path, label) {
+    const url = `${ESP_IP}${path}`;
+    try {
+      // mode:'no-cors' needed when page is on HTTPS but ESP is HTTP
+      await fetch(url, { mode: 'no-cors' });
+      showToast(label ? `✓ ${label}` : '✓ Command Sent');
+    } catch (err) {
+      showToast('⚠ Not connected to AC WiFi');
+    }
+  }
+
+  // ── Temperature ──────────────────────────────────────────────
   function changeTemp(delta) {
     const newTemp = temp + delta;
     if (newTemp >= minTemp && newTemp <= maxTemp) {
       temp = newTemp;
       document.getElementById('temp-display').innerHTML = `${temp}<span>°C</span>`;
       updateDial();
-      
-      const endpoint = delta > 0 ? '/temp_up' : '/temp_down';
-      simulateCommand(endpoint);
+      // Match Arduino sketch endpoints exactly
+      sendCommand(delta > 0 ? '/tempup' : '/tempdown', `Temp ${temp}°C`);
     }
   }
 
+  // ── Power ─────────────────────────────────────────────────────
   let powerState = true;
   function togglePower() {
     powerState = !powerState;
     const btn = document.getElementById('power-btn');
-    if(powerState) {
-      btn.classList.add('on');
-    } else {
-      btn.classList.remove('on');
-    }
-    simulateCommand('/power');
+    powerState ? btn.classList.add('on') : btn.classList.remove('on');
+    sendCommand('/power', powerState ? 'AC ON' : 'AC OFF');
   }
 
+  // ── Mode ──────────────────────────────────────────────────────
   function setMode(mode) {
     document.querySelectorAll('.mode-btn').forEach(btn => btn.classList.remove('active'));
     event.currentTarget.classList.add('active');
     showToast(`Mode: ${mode.toUpperCase()}`);
   }
 
+  // ── Schedule ─────────────────────────────────────────────────
   function setSchedule() {
     const timeVal = document.getElementById('auto-on-time').value;
-    if(!timeVal) return;
-    
-    showToast(`AC Scheduled for ${timeVal}`);
-    
-    // Convert time to a format the ESP8266 can parse easily (like HH:MM)
-    fetch(`/schedule?time=${timeVal}`).catch(err => {
-      // Fallback for UI testing
-      !window.location.protocol.includes('http') && console.log(`Triggered: /schedule?time=${timeVal}`);
-    });
+    if (!timeVal) return;
+    sendCommand(`/schedule?time=${timeVal}`, `Scheduled ${timeVal}`);
   }
 
+  // ── Extra buttons ─────────────────────────────────────────────
+  function simulateCommand(endpoint) {
+    const label = endpoint.replace('/', '').replace('_', ' ').toUpperCase();
+    sendCommand(endpoint, label);
+  }
+
+  // ── Toast ─────────────────────────────────────────────────────
   function showToast(msg) {
-    const toast = document.getElementById("toast");
+    const toast = document.getElementById('toast');
     toast.innerText = msg;
-    toast.className = "show";
-    setTimeout(function(){ toast.className = toast.className.replace("show", ""); }, 2000);
+    toast.className = 'show';
+    setTimeout(() => { toast.className = toast.className.replace('show', ''); }, 2500);
   }
 
-  async function simulateCommand(endpoint) {
-    // Determine command mapping for standard HTTP endpoint
-    return fetch(endpoint).then(res => {
-      showToast("Sent Action!");
-    }).catch(err => {
-      // Ignore network errors in preview mode
-      showToast("Triggered: " + endpoint.replace('/', '').toUpperCase());
-    });
+  // ── Connection Status Ping ────────────────────────────────────
+  const dot  = document.getElementById('status-dot');
+  const statusText = document.getElementById('status-text');
+
+  async function checkConnection() {
+    try {
+      await fetch(`${ESP_IP}/power`, { mode: 'no-cors', signal: AbortSignal.timeout(2000) });
+      // no-cors always 'succeeds' if reachable (opaque response)
+      dot.className = 'status-dot connected';
+      statusText.textContent = 'Connected';
+    } catch {
+      dot.className = 'status-dot disconnected';
+      statusText.textContent = 'No AC WiFi';
+    }
   }
 
+  // ── Init ──────────────────────────────────────────────────────
   updateDial();
+  checkConnection();
+  setInterval(checkConnection, 5000); // ping every 5s
 
   // Register PWA Service Worker
   if ('serviceWorker' in navigator) {
     window.addEventListener('load', () => {
-      navigator.serviceWorker.register('./sw.js').then(reg => {
-        console.log('ServiceWorker registration successful');
-      }).catch(err => {
-        console.log('ServiceWorker registration failed: ', err);
-      });
+      navigator.serviceWorker.register('./sw.js')
+        .then(() => console.log('SW registered'))
+        .catch(err => console.log('SW failed:', err));
     });
   }
 </script>
