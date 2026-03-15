@@ -1,6 +1,6 @@
-const CACHE_NAME = 'ac-controller-v1';
+const CACHE_NAME = 'ac-controller-v2';
 const ASSETS_TO_CACHE = [
-  './UI_Preview.html',
+  './index.html',
   './manifest.json',
   './icon.svg',
   'https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap'
