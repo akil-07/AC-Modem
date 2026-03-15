@@ -1,10 +1,9 @@
 #include <ESP8266WiFi.h>
 #include <ESP8266WebServer.h>
-#include <time.h>
 
-// Replace with your Network Credentials
-const char* ssid = "YOUR_WIFI_SSID";
-const char* password = "YOUR_WIFI_PASSWORD";
+// Access Point credentials (ESP creates its own WiFi)
+const char* apSSID     = "Akil_AC_Control";
+const char* apPassword = "12345678";
 
 ESP8266WebServer server(80);
 
@@ -367,7 +366,7 @@ const char html_page[] PROGMEM = R"rawliteral(<!DOCTYPE html>
 const char manifest_json[] PROGMEM = R"rawliteral({
   "name": "Smart AC Controller",
   "short_name": "AC Control",
-  "start_url": "./UI_Preview.html",
+  "start_url": "./index.html",
   "display": "standalone",
   "background_color": "#f4f5f7",
   "theme_color": "#ffffff",
@@ -390,9 +389,9 @@ const char manifest_json[] PROGMEM = R"rawliteral({
   ]
 }
 )rawliteral";
-const char sw_js[] PROGMEM = R"rawliteral(const CACHE_NAME = 'ac-controller-v1';
+const char sw_js[] PROGMEM = R"rawliteral(const CACHE_NAME = 'ac-controller-v2';
 const ASSETS_TO_CACHE = [
-  './UI_Preview.html',
+  './index.html',
   './manifest.json',
   './icon.svg',
   'https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap'
@@ -451,8 +450,8 @@ const char icon_svg[] PROGMEM = R"rawliteral(<svg xmlns="http://www.w3.org/2000/
 )rawliteral";
 
 // Route handlers
-void handlePower() { pressButton(PIN_POWER); server.send(200, "text/plain", "Power Button Pressed"); }
-void handleTempUp() { pressButton(PIN_TEMP_UP); server.send(200, "text/plain", "Temp Up Pressed"); }
+void handlePower()    { pressButton(PIN_POWER);     server.send(200, "text/plain", "Power Button Pressed"); }
+void handleTempUp()   { pressButton(PIN_TEMP_UP);   server.send(200, "text/plain", "Temp Up Pressed"); }
 void handleTempDown() { pressButton(PIN_TEMP_DOWN); server.send(200, "text/plain", "Temp Down Pressed"); }
 void handleSchedule() {
   if (server.hasArg("time")) {
@@ -471,62 +470,40 @@ void setup() {
   pinMode(PIN_POWER, OUTPUT); pinMode(PIN_TEMP_UP, OUTPUT); pinMode(PIN_TEMP_DOWN, OUTPUT);
   digitalWrite(PIN_POWER, LOW); digitalWrite(PIN_TEMP_UP, LOW); digitalWrite(PIN_TEMP_DOWN, LOW);
 
-  WiFi.mode(WIFI_STA);
-  WiFi.begin(ssid, password);
-  Serial.print("Connecting to WiFi");
-  while (WiFi.status() != WL_CONNECTED) { delay(500); Serial.print("."); }
-  Serial.println(""); Serial.print("Connected to "); Serial.println(ssid);
-  Serial.print("IP address: "); Serial.println(WiFi.localIP());
+  // Start in AP mode — ESP creates its own WiFi hotspot
+  WiFi.mode(WIFI_AP);
+  WiFi.softAP(apSSID, apPassword);
+  Serial.println("Access Point started");
+  Serial.print("AP IP address: "); Serial.println(WiFi.softAPIP()); // default: 192.168.4.1
 
-  configTime(19800, 0, "pool.ntp.org", "time.nist.gov"); // IST Timezone offset: 5.5 * 3600 = 19800
+  // Serve UI assets from PROGMEM
+  server.on("/",            []() { server.send_P(200, "text/html",        html_page);    });
+  server.on("/index.html",  []() { server.send_P(200, "text/html",        html_page);    });
+  server.on("/manifest.json",[]() { server.send_P(200, "application/json", manifest_json); });
+  server.on("/sw.js",       []() { server.send_P(200, "application/javascript", sw_js);  });
+  server.on("/icon.svg",    []() { server.send_P(200, "image/svg+xml",    icon_svg);     });
 
-  // Serve static UI assets from PROGMEM
-  server.on("/", []() { server.send_P(200, "text/html", html_page); });
-  server.on("/UI_Preview.html", []() { server.send_P(200, "text/html", html_page); });
-  server.on("/index.html", []() { server.send_P(200, "text/html", html_page); });
-  server.on("/manifest.json", []() { server.send_P(200, "application/json", manifest_json); });
-  server.on("/sw.js", []() { server.send_P(200, "application/javascript", sw_js); });
-  server.on("/icon.svg", []() { server.send_P(200, "image/svg+xml", icon_svg); });
-
-  // Control APIs
-  server.on("/power", handlePower);
-  server.on("/temp_up", handleTempUp);
-  server.on("/temp_down", handleTempDown);
+  // Control APIs — match index.html exactly
+  server.on("/power",    handlePower);
+  server.on("/tempup",   handleTempUp);    // matches index.html /tempup
+  server.on("/tempdown", handleTempDown);  // matches index.html /tempdown
   server.on("/schedule", handleSchedule);
-  
-  // Dummy handlers for other un-implemented endpoints to avoid 404s in console
-  server.on("/timer_on", [](){ server.send(200, "text/plain", "OK"); });
-  server.on("/timer_off", [](){ server.send(200, "text/plain", "OK"); });
-  server.on("/clock", [](){ server.send(200, "text/plain", "OK"); });
-  server.on("/swing", [](){ server.send(200, "text/plain", "OK"); });
-  server.on("/energy_save", [](){ server.send(200, "text/plain", "OK"); });
-  server.on("/turbo", [](){ server.send(200, "text/plain", "OK"); });
-  server.on("/sleep", [](){ server.send(200, "text/plain", "OK"); });
-  server.on("/light", [](){ server.send(200, "text/plain", "OK"); });
-  server.on("/temp_btn", [](){ server.send(200, "text/plain", "OK"); });
+
+  // Stub handlers for extra buttons (avoid 404s)
+  auto ok = [](){ server.send(200, "text/plain", "OK"); };
+  server.on("/timer_on",   ok); server.on("/timer_off",  ok);
+  server.on("/clock",      ok); server.on("/swing",       ok);
+  server.on("/energy_save",ok); server.on("/turbo",       ok);
+  server.on("/sleep",      ok); server.on("/light",       ok);
+  server.on("/temp_btn",   ok);
 
   server.onNotFound(handleNotFound);
-
   server.begin(); Serial.println("HTTP server started");
 }
 
-void loop() { 
-  server.handleClient(); 
-  
-  if (scheduledTime != "" && !scheduleTriggered) {
-    time_t now = time(nullptr);
-    struct tm* timeinfo = localtime(&now);
-    
-    // Check if time is properly synced (year > 1970)
-    if (timeinfo->tm_year > 70) {
-      char timeStr[6];
-      sprintf(timeStr, "%02d:%02d", timeinfo->tm_hour, timeinfo->tm_min);
-      
-      if (String(timeStr) == scheduledTime) {
-        Serial.println("Schedule Triggered! Turning ON AC.");
-        pressButton(PIN_POWER);
-        scheduleTriggered = true; // Prevent running multiple times in same minute
-      }
-    }
-  }
+void loop() {
+  server.handleClient();
+  // Note: Schedule feature requires NTP (internet). In AP mode the ESP has
+  // no internet, so schedule is accepted but won't auto-trigger by time.
+  // To enable scheduling, switch to WIFI_STA mode and restore configTime().
 }
